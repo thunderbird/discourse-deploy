@@ -20,6 +20,10 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # The OIDC role's trust policy requires this Environment claim. See
+    # platform-infrastructure pulumi/environments/mzla-workloads/config.prod.yaml
+    # github_oidc.roles.discourse-deploy.github_environment.
+    environment: production
     steps:
       - name: Checkout discourse-deploy
         uses: actions/checkout@v4
@@ -39,7 +43,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::668807881758:role/github-actions-discourse-deploy
+          role-to-assume: arn:aws:iam::668807881758:role/workloads-prod-discourse-deploy
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to ECR
