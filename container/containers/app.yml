@@ -17,21 +17,11 @@ templates:
   # intentionally OMITTED -- we use external Postgres + Redis and don't run
   # Unix-socketed nginx inside the container.
 
-# Plugins baked into the image. Keep this list narrow; site-customisation
-# (brand theme, board structure) goes in the Discourse admin UI or a
-# theme-component repo, not here.
-hooks:
-  after_code:
-    - exec:
-        cd: $home/plugins
-        cmd:
-          - git clone --depth 1 https://github.com/discourse/discourse-openid-connect.git
-          - git clone --depth 1 https://github.com/discourse/discourse-prometheus.git
-
-# Rebuild assets after plugin install so they show up in the precompiled
-# bundle.
-run:
-  - exec: cd $home && sudo -E -u discourse bundle exec rake themes:update assets:precompile
+# Plugins: we don't clone any here. Both discourse-openid-connect and
+# discourse-prometheus are core/bundled plugins shipped with the base
+# image -- attempting to git clone them fails with "destination path
+# already exists" during bootstrap. Add hooks here only for plugins not
+# already bundled with Discourse core.
 
 # All env vars below are optional/baked-in defaults -- runtime ConfigMap
 # overrides them. We only set values that affect bootstrap-time choices.
