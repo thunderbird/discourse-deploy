@@ -19,7 +19,12 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # ARM64 runner: mzla-eks-workloads01 default node groups (system,
+    # general-arm64) are Graviton; the amd64 nodegroup has an
+    # arch=amd64:NoSchedule taint, so an x86 image won't run by default.
+    # discourse_docker's launcher bootstraps for the host arch, so building
+    # on arm gives us an arm64 image directly (no buildx/QEMU needed).
+    runs-on: ubuntu-24.04-arm
     # The OIDC role's trust policy requires this Environment claim. See
     # platform-infrastructure pulumi/environments/mzla-workloads/config.prod.yaml
     # github_oidc.roles.discourse-deploy.github_environment.
