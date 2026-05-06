@@ -67,7 +67,11 @@ spec:
               fi
 
               echo "Setting password for ${APP_USER}..."
-              psql -v ON_ERROR_STOP=1 -c "ALTER USER ${APP_USER} WITH PASSWORD '${APP_PASSWORD}'"
+              # Use psql variable interpolation (:'app_pw') so psql handles
+              # quoting/escaping; safer than embedding ${APP_PASSWORD} via
+              # shell expansion if the value ever contains '$ or backticks.
+              psql -v ON_ERROR_STOP=1 -v "app_pw=${APP_PASSWORD}" \
+                -c "ALTER USER ${APP_USER} WITH PASSWORD :'app_pw'"
 
               echo "Granting database + public schema privileges..."
               psql -v ON_ERROR_STOP=1 <<SQL

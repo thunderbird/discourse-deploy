@@ -83,10 +83,12 @@ Every external request comes in through Cloudflare → `cloudflared` → `discou
 ```
 discourse-deploy/
 ├── README.md                                       you are here
+├── .github/
+│   ├── CODEOWNERS                                  @thunderbird/platform-infrastructure on all paths
+│   └── workflows/build.yml                         build + push to ECR on tag
 ├── container/
 │   ├── Dockerfile                                  bootstrap wrapper invoking discourse_docker launcher
-│   ├── containers/app.yml                          discourse_docker config (plugins, hooks)
-│   └── .github/workflows/build.yml                 build + push to ECR on tag
+│   └── containers/app.yml                          discourse_docker config (plugins, hooks)
 ├── argocd/
 │   ├── aws-resources/
 │   │   ├── rds-postgres.yaml                       ACK DBSubnetGroup + DBInstance (postgres 16)

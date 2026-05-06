@@ -22,7 +22,15 @@ data:
   DISCOURSE_DEFAULT_LOCALE: "en"
 
   # --- Postgres (RDS) ---
-  # PG host is patched in after the ACK DBInstance reports its endpoint.
+  # PG host is a <TBD> placeholder. ACK does not surface the RDS endpoint
+  # until *after* the DBInstance reconciles, so wave 5 (this ConfigMap +
+  # the web/sidekiq Deployments) cannot resolve it on the first sync.
+  # Bring-up procedure: after wave 3 lands, run
+  #   kubectl get dbinstance discourse-postgres -n discourse \
+  #     -o jsonpath='{.status.endpoint.address}'
+  # and PR the resolved hostname here. See README "Bring-up runbook" §4.
+  # Discourse will CrashLoop until this is patched -- intentional, gated
+  # by the bootstrap Job's PGHOST which must be patched at the same time.
   DISCOURSE_DB_HOST: "discourse-postgres.<TBD>.eu-central-1.rds.amazonaws.com"
   DISCOURSE_DB_PORT: "5432"
   DISCOURSE_DB_NAME: "discourse"
@@ -30,7 +38,10 @@ data:
   DISCOURSE_DB_USE_SSL: "true"
 
   # --- Redis (ElastiCache) ---
-  # Same: patch in once the ReplicationGroup endpoint resolves.
+  # Same <TBD> two-phase pattern as DISCOURSE_DB_HOST. Resolve via
+  #   kubectl get replicationgroup discourse-redis -n discourse \
+  #     -o jsonpath='{.status.nodeGroups[0].primaryEndpoint.address}'
+  # then PR the value here. See README "Bring-up runbook" §4.
   DISCOURSE_REDIS_HOST: "discourse-redis.<TBD>.cache.amazonaws.com"
   DISCOURSE_REDIS_PORT: "6379"
   DISCOURSE_REDIS_USE_SSL: "true"
