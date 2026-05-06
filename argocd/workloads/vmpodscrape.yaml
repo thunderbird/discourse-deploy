@@ -1,0 +1,35 @@
+# Pod scrape for Discourse web. The discourse-prometheus plugin (baked
+# into the image) exposes metrics on :7001/metrics; the cluster's
+# generic 'pods-with-annotations' VMPodScrape doesn't reach into our
+# pods because we don't set prometheus.io/* annotations, so wire an
+# explicit scrape here.
+#
+# Sidekiq is included via the same selector -- the plugin reports queue
+# depth and job latency from the sidekiq processes too.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: discourse
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [discourse]
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [web, sidekiq]
+  podMetricsEndpoints:
+    - port: ""
+      path: /metrics
+      interval: 30s
+      honorLabels: true
+      relabelConfigs:
+        - sourceLabels: [__meta_kubernetes_pod_ip]
+          targetLabel: __address__
+          replacement: ${1}:7001
+        - sourceLabels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+          targetLabel: component

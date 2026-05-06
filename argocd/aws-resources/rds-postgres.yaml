@@ -1,0 +1,66 @@
+# RDS Postgres for Discourse.
+#
+# Network: attaches to the EKS cluster SG (sg-0ea4b5695515a4b50). EKS
+# allows all traffic between members of the cluster SG, so pods running
+# on managed nodes reach Postgres on 5432 without a dedicated app SG.
+# Same approach as twenty-deploy.
+#
+# Postgres 16: Discourse 3.x supports 13+; 16 keeps us aligned with the
+# RDS major used elsewhere in this account. Avoid 17 (transaction_timeout
+# / extension incompatibilities reported on meta.discourse.org).
+---
+apiVersion: rds.services.k8s.aws/v1alpha1
+kind: DBSubnetGroup
+metadata:
+  name: discourse-rds-subnet-group
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  name: discourse-rds-subnet-group
+  description: "Discourse RDS subnet group - private subnets in workloads VPC"
+  subnetIDs:
+    - subnet-02cbec9d02b385c41  # eu-central-1a
+    - subnet-0953fbdd06fda6d54  # eu-central-1b
+  tags:
+    - key: project
+      value: discourse
+    - key: managed-by
+      value: ack
+---
+apiVersion: rds.services.k8s.aws/v1alpha1
+kind: DBInstance
+metadata:
+  name: discourse-postgres
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  dbInstanceIdentifier: discourse-postgres
+  engine: postgres
+  engineVersion: "16.6"
+  dbInstanceClass: db.t4g.medium
+  allocatedStorage: 30
+  storageType: gp3
+  storageEncrypted: true
+  masterUsername: postgres
+  masterUserPassword:
+    namespace: discourse
+    name: discourse-db-credentials
+    key: masterPassword
+  dbName: discourse  # RDS creates the 'discourse' database on first boot
+  dbSubnetGroupName: discourse-rds-subnet-group
+  vpcSecurityGroupIDs:
+    - sg-0ea4b5695515a4b50  # mzla-eks-workloads01 cluster SG
+  multiAZ: false
+  backupRetentionPeriod: 7
+  preferredBackupWindow: "03:00-04:00"
+  preferredMaintenanceWindow: "sun:05:00-sun:06:00"
+  deletionProtection: true
+  copyTagsToSnapshot: true
+  publiclyAccessible: false
+  tags:
+    - key: project
+      value: discourse
+    - key: managed-by
+      value: ack

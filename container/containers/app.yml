@@ -1,0 +1,42 @@
+# discourse_docker app.yml — minimal "data layer is external" config.
+#
+# This file is consumed by ./launcher bootstrap to produce the Discourse
+# OCI image. Because we run Postgres/Redis externally on AWS managed
+# services, we strip discourse-docker's bundled Postgres/Redis/Nginx
+# templates and only keep the web app + sidekiq capability. Connection
+# values are NOT baked in -- they're injected at pod runtime via
+# ConfigMap and Secrets.
+#
+# Image tag: 668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:<sha|tag>
+# Build CI:  .github/workflows/build.yml in this repo
+
+templates:
+  - "templates/web.template.yml"
+  - "templates/web.ratelimited.template.yml"
+  # NOTE: postgres.template.yml, redis.template.yml, web.socketed.template.yml
+  # intentionally OMITTED -- we use external Postgres + Redis and don't run
+  # Unix-socketed nginx inside the container.
+
+# Plugins baked into the image. Keep this list narrow; site-customisation
+# (brand theme, board structure) goes in the Discourse admin UI or a
+# theme-component repo, not here.
+hooks:
+  after_code:
+    - exec:
+        cd: $home/plugins
+        cmd:
+          - git clone --depth 1 https://github.com/discourse/discourse-openid-connect.git
+          - git clone --depth 1 https://github.com/discourse/discourse-prometheus.git
+
+# Rebuild assets after plugin install so they show up in the precompiled
+# bundle.
+run:
+  - exec: cd $home && sudo -E -u discourse bundle exec rake themes:update assets:precompile
+
+# All env vars below are optional/baked-in defaults -- runtime ConfigMap
+# overrides them. We only set values that affect bootstrap-time choices.
+env:
+  LANG: en_US.UTF-8
+  RAILS_ENV: production
+  UNICORN_WORKERS: 3
+  DISCOURSE_HOSTNAME: discourse.thunderbird.net

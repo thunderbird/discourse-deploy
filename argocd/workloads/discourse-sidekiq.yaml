@@ -1,0 +1,84 @@
+# Discourse Sidekiq (background jobs).
+#
+# Same image as discourse-web. The image's default entrypoint runs Puma;
+# we override `command` so this Pod boots Sidekiq instead. No Service
+# required -- Sidekiq pulls jobs from Redis and writes results back to
+# Postgres.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discourse-sidekiq
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  labels:
+    app.kubernetes.io/name: discourse
+    app.kubernetes.io/component: sidekiq
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # Sidekiq job leases recover after crash; no need for rolling
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: discourse
+      app.kubernetes.io/component: sidekiq
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: discourse
+        app.kubernetes.io/component: sidekiq
+    spec:
+      serviceAccountName: default
+      containers:
+        - name: sidekiq
+          image: 668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:latest
+          imagePullPolicy: Always
+          command:
+            - /bin/bash
+            - -c
+            - cd /var/www/discourse && bundle exec sidekiq -q critical -q default -q low -q ultra_low
+          envFrom:
+            - configMapRef:
+                name: discourse-config
+          env:
+            - name: DISCOURSE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: discourse-db-credentials
+                  key: appPassword
+            - name: DISCOURSE_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: discourse-redis-credentials
+                  key: authToken
+            - name: DISCOURSE_SECRET_KEY_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: discourse-app-secrets
+                  key: secretKeyBase
+            - name: DISCOURSE_SMTP_USER_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: discourse-smtp-credentials
+                  key: username
+            - name: DISCOURSE_SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: discourse-smtp-credentials
+                  key: password
+          # Sidekiq has no built-in HTTP probe; check the process via exec.
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pgrep -f sidekiq >/dev/null
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "300m"
+              memory: "1Gi"
+            limits:
+              memory: "2Gi"

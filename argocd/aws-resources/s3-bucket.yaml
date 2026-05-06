@@ -1,0 +1,27 @@
+# S3 bucket for Discourse uploads (avatars, attachments, post images, backups).
+# Discourse's S3 driver picks up credentials from the AWS SDK default
+# provider chain when DISCOURSE_S3_USE_IAM_PROFILE=true, so no static
+# keys live in the cluster. Access is granted via IRSA on the discourse
+# namespace's default ServiceAccount (workloads-prod-discourse-default).
+apiVersion: s3.services.k8s.aws/v1alpha1
+kind: Bucket
+metadata:
+  name: discourse-uploads
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  name: mzla-discourse-uploads
+  versioning:
+    status: Enabled
+  publicAccessBlock:
+    blockPublicACLs: true
+    blockPublicPolicy: true
+    ignorePublicACLs: true
+    restrictPublicBuckets: true
+  tagging:
+    tagSet:
+      - key: project
+        value: discourse
+      - key: managed-by
+        value: ack

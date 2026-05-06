@@ -1,0 +1,61 @@
+name: Build and push Discourse image
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to push (e.g. v3.4.0-bolt.1)'
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  ECR_REPO: 668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout discourse-deploy
+        uses: actions/checkout@v4
+        with:
+          path: deploy
+
+      - name: Checkout discourse_docker
+        uses: actions/checkout@v4
+        with:
+          repository: discourse/discourse_docker
+          path: launcher
+          ref: main
+
+      - name: Stage app.yml
+        run: cp deploy/container/containers/app.yml launcher/containers/app.yml
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::668807881758:role/github-actions-discourse-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Bootstrap Discourse
+        working-directory: launcher
+        run: sudo ./launcher bootstrap app
+
+      - name: Determine tag
+        id: tag
+        run: echo "tag=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Tag and push
+        run: |
+          docker tag local_discourse/app:latest "$ECR_REPO:${{ steps.tag.outputs.tag }}"
+          docker tag local_discourse/app:latest "$ECR_REPO:latest"
+          docker push "$ECR_REPO:${{ steps.tag.outputs.tag }}"
+          docker push "$ECR_REPO:latest"
