@@ -60,8 +60,13 @@ jobs:
         run: echo "tag=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
 
       - name: Tag and push
+        # Run as the runner user (no sudo). The ECR credential helper
+        # was installed in $HOME/.docker/config.json by amazon-ecr-login;
+        # `sudo docker` would use root's empty config and fail with
+        # "no basic auth credentials". The runner user is in the docker
+        # group on hosted runners, so non-sudo docker commands work.
         run: |
-          sudo docker tag local_discourse/app:latest "$ECR_REPO:${{ steps.tag.outputs.tag }}"
-          sudo docker tag local_discourse/app:latest "$ECR_REPO:latest"
-          sudo docker push "$ECR_REPO:${{ steps.tag.outputs.tag }}"
-          sudo docker push "$ECR_REPO:latest"
+          docker tag local_discourse/app:latest "$ECR_REPO:${{ steps.tag.outputs.tag }}"
+          docker tag local_discourse/app:latest "$ECR_REPO:latest"
+          docker push "$ECR_REPO:${{ steps.tag.outputs.tag }}"
+          docker push "$ECR_REPO:latest"
