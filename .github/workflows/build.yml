@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Image tag to push (e.g. v3.4.0-bolt.1)'
+        description: 'Image tag to push (e.g. v0.1.0)'
         required: true
 
 permissions:
@@ -20,30 +20,14 @@ env:
 jobs:
   build:
     # ARM64 runner: mzla-eks-workloads01 default node groups (system,
-    # general-arm64) are Graviton; the amd64 nodegroup has an
-    # arch=amd64:NoSchedule taint, so an x86 image won't run by default.
-    # discourse_docker's launcher bootstraps for the host arch, so building
-    # on arm gives us an arm64 image directly (no buildx/QEMU needed).
+    # general-arm64) are Graviton; the general-amd64 nodegroup has an
+    # arch=amd64:NoSchedule taint, so an x86 image won't get a node by default.
     runs-on: ubuntu-24.04-arm
-    # The OIDC role's trust policy requires this Environment claim. See
-    # platform-infrastructure pulumi/environments/mzla-workloads/config.prod.yaml
-    # github_oidc.roles.discourse-deploy.github_environment.
+    # OIDC trust requires the Environment claim.
     environment: production
     steps:
       - name: Checkout discourse-deploy
         uses: actions/checkout@v4
-        with:
-          path: deploy
-
-      - name: Checkout discourse_docker
-        uses: actions/checkout@v4
-        with:
-          repository: discourse/discourse_docker
-          path: launcher
-          ref: main
-
-      - name: Stage app.yml
-        run: cp deploy/container/containers/app.yml launcher/containers/app.yml
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -54,17 +38,25 @@ jobs:
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Bootstrap Discourse
-        working-directory: launcher
-        run: sudo ./launcher bootstrap app
-
       - name: Determine tag
         id: tag
         run: echo "tag=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
 
-      - name: Tag and push
-        run: |
-          docker tag local_discourse/app:latest "$ECR_REPO:${{ steps.tag.outputs.tag }}"
-          docker tag local_discourse/app:latest "$ECR_REPO:latest"
-          docker push "$ECR_REPO:${{ steps.tag.outputs.tag }}"
-          docker push "$ECR_REPO:latest"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: container
+          file: container/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.ECR_REPO }}:${{ steps.tag.outputs.tag }}
+            ${{ env.ECR_REPO }}:latest
+          # arm64 runner builds an arm64 image natively (no QEMU needed).
+          provenance: false
+          sbom: false
+          cache-from: type=registry,ref=${{ env.ECR_REPO }}:buildcache
+          cache-to: type=registry,ref=${{ env.ECR_REPO }}:buildcache,mode=max
