@@ -85,11 +85,13 @@ spec:
               ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO ${APP_USER};
               SQL
 
-              # Discourse requires hstore + pg_trgm; create with master
-              # creds since the app user lacks SUPERUSER.
+              # Discourse requires hstore + pg_trgm + vector (pgvector,
+              # used by the AI/embeddings code path). All created with
+              # master creds because the app user lacks rds_superuser.
               echo "Ensuring required extensions..."
               psql -v ON_ERROR_STOP=1 <<SQL
               CREATE EXTENSION IF NOT EXISTS hstore;
               CREATE EXTENSION IF NOT EXISTS pg_trgm;
+              CREATE EXTENSION IF NOT EXISTS vector;
               SQL
               echo "Done."
