@@ -73,4 +73,4 @@ data:
   # VMAgent can't reach. Bind to all interfaces so the pod-IP scrape
   # works. The collector port is only exposed inside the pod-network
   # (no Service maps it), so this is internal-only by construction.
-  DISCOURSE_PROMETHEUS_COLLECTOR_HOST: "0.0.0.0"
+  DISCOURSE_PROMETHEUS_WEBSERVER_BIND: "0.0.0.0"
