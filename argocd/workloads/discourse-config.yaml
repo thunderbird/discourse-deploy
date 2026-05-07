@@ -67,3 +67,10 @@ data:
   # --- Misc ---
   DISCOURSE_ENABLE_CORS: "true"
   DISCOURSE_SERVE_STATIC_ASSETS: "true"
+
+  # --- discourse-prometheus plugin ---
+  # The collector defaults to binding 127.0.0.1:9405, which the cluster
+  # VMAgent can't reach. Bind to all interfaces so the pod-IP scrape
+  # works. The collector port is only exposed inside the pod-network
+  # (no Service maps it), so this is internal-only by construction.
+  DISCOURSE_PROMETHEUS_COLLECTOR_HOST: "0.0.0.0"
