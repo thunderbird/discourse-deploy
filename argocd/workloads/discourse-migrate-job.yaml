@@ -33,7 +33,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: migrate
-          image: 668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:latest
+          image: 668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:v0.1.0
           imagePullPolicy: Always
           envFrom:
             - configMapRef:
