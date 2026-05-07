@@ -44,8 +44,12 @@ spec:
           # does at runtime.
           command: ["/sbin/boot"]
           ports:
+            # nginx (baked in by web.template.yml) listens on :80 and
+            # proxies to unicorn on 127.0.0.1:3000. Pod-network reachable
+            # service is :80; probing :3000 from outside the container
+            # fails because unicorn is bound to localhost only.
             - name: http
-              containerPort: 3000
+              containerPort: 80
             - name: metrics
               containerPort: 7001  # discourse-prometheus plugin port
           envFrom:
