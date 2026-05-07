@@ -1,13 +1,15 @@
-# Pod scrape for Discourse web + sidekiq. The discourse-prometheus
-# plugin (bundled in the discourse_docker base image) exposes metrics
-# on :9405/metrics, but only when enabled in admin UI:
+# Pod scrape for Discourse web. The discourse-prometheus plugin
+# (cloned in by container/containers/app.yml) exposes metrics on
+# :9405/metrics, but the plugin must be enabled:
 #   Admin -> Plugins -> discourse-prometheus -> enabled
-# The cluster's generic 'pods-with-annotations' VMPodScrape doesn't
-# reach into our pods (no prometheus.io/* annotations), so wire an
-# explicit scrape here.
+# AND DISCOURSE_PROMETHEUS_WEBSERVER_BIND=0.0.0.0 must be set in the
+# ConfigMap for VMAgent to reach it on the pod IP (default is
+# localhost-only).
 #
-# Sidekiq is included via the same selector -- the plugin reports queue
-# depth and job latency from the sidekiq processes too.
+# Only web pods are scraped: the prometheus collector runs as a child
+# of the unicorn master, so the HTTP server lives on the web pods.
+# Sidekiq processes report their metrics to the collector via IPC,
+# so discourse_sidekiq_* metrics surface on the web pods' :9405 too.
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMPodScrape
 metadata:
@@ -23,7 +25,7 @@ spec:
         values: [discourse]
       - key: app.kubernetes.io/component
         operator: In
-        values: [web, sidekiq]
+        values: [web]
   podMetricsEndpoints:
     - port: ""
       path: /metrics
