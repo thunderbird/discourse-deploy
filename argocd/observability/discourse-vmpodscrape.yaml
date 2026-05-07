@@ -1,7 +1,9 @@
-# Pod scrape for Discourse web. The discourse-prometheus plugin (baked
-# into the image) exposes metrics on :7001/metrics; the cluster's
-# generic 'pods-with-annotations' VMPodScrape doesn't reach into our
-# pods because we don't set prometheus.io/* annotations, so wire an
+# Pod scrape for Discourse web + sidekiq. The discourse-prometheus
+# plugin (bundled in the discourse_docker base image) exposes metrics
+# on :9405/metrics, but only when enabled in admin UI:
+#   Admin -> Plugins -> discourse-prometheus -> enabled
+# The cluster's generic 'pods-with-annotations' VMPodScrape doesn't
+# reach into our pods (no prometheus.io/* annotations), so wire an
 # explicit scrape here.
 #
 # Sidekiq is included via the same selector -- the plugin reports queue
@@ -30,6 +32,6 @@ spec:
       relabelConfigs:
         - sourceLabels: [__meta_kubernetes_pod_ip]
           targetLabel: __address__
-          replacement: ${1}:7001
+          replacement: ${1}:9405
         - sourceLabels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
           targetLabel: component
