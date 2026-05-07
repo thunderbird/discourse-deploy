@@ -26,10 +26,14 @@ ENV RAILS_ENV=production \
 USER root
 WORKDIR /var/www
 
-# Clone Discourse at the pinned version. --depth 1 keeps the layer small.
-RUN git clone --depth 1 --branch ${DISCOURSE_VERSION} \
+# discourse/base:release ships /var/www/discourse pre-populated with
+# placeholder dirs/symlinks for the launcher's expected layout. Wipe and
+# replace with our cloned source at the pinned version. --depth 1 keeps
+# the layer small.
+RUN rm -rf /var/www/discourse \
+ && git clone --depth 1 --branch ${DISCOURSE_VERSION} \
         https://github.com/discourse/discourse.git \
-        discourse \
+        /var/www/discourse \
  && chown -R discourse:www-data /var/www/discourse
 
 WORKDIR /var/www/discourse
