@@ -34,7 +34,7 @@ spec:
             # See README "Bootstrap RDS endpoint" for how to update it
             # (kubectl patch or a one-off PR after first sync).
             - name: PGHOST
-              value: discourse-postgres.<TBD>.eu-central-1.rds.amazonaws.com
+              value: discourse-postgres.c18simi4g02c.eu-central-1.rds.amazonaws.com
             - name: PGPORT
               value: "5432"
             - name: PGUSER
