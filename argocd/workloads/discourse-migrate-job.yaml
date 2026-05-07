@@ -1,0 +1,74 @@
+# Discourse db:migrate against RDS.
+#
+# Runs after rds-bootstrap-job (which creates discourse_app_user, grants,
+# and the hstore + pg_trgm extensions) and before discourse-web /
+# discourse-sidekiq pods start. Idempotent -- Rails migrations track
+# what's been run in schema_migrations and skip ones already applied.
+#
+# Sync hook so re-runs trigger on every ArgoCD sync (covers image bumps
+# that ship new migrations).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: discourse-db-migrate
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+    # Sequence: rds-bootstrap-job (also wave 4) creates the user before
+    # this Job runs migrations as that user. ArgoCD syncs same-wave hook
+    # Jobs in parallel, but the migrate Job's `until pg_isready` loop +
+    # the rds-bootstrap-job's quick run mean ordering effectively
+    # serializes anyway. If we hit races, split into wave 4 and wave 5.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: discourse
+        app.kubernetes.io/component: db-migrate
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: 668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:latest
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: discourse-config
+          env:
+            - name: DISCOURSE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: discourse-db-credentials
+                  key: appPassword
+            - name: DISCOURSE_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: discourse-redis-credentials
+                  key: authToken
+            - name: DISCOURSE_SECRET_KEY_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: discourse-app-secrets
+                  key: secretKeyBase
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              cd /var/www/discourse
+              echo "Waiting for ${DISCOURSE_DB_HOST}:${DISCOURSE_DB_PORT}..."
+              until (echo > /dev/tcp/${DISCOURSE_DB_HOST}/${DISCOURSE_DB_PORT}) 2>/dev/null; do sleep 5; done
+
+              echo "Running Rails migrations..."
+              bundle exec rake db:migrate
+
+              echo "Done."
+          resources:
+            requests:
+              cpu: "300m"
+              memory: "1Gi"
+            limits:
+              memory: "2Gi"

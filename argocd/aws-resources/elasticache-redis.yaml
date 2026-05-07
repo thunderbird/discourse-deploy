@@ -1,0 +1,56 @@
+# ElastiCache Redis for Discourse.
+# Single-node, transit encryption + auth token, AOF off (Discourse uses
+# Redis as cache + Sidekiq queue; in-flight job loss is recoverable).
+#
+# Attaches to the EKS cluster SG; EKS's self-reference rule lets pods
+# reach Redis on 6379 without a dedicated SG.
+---
+apiVersion: elasticache.services.k8s.aws/v1alpha1
+kind: CacheSubnetGroup
+metadata:
+  name: discourse-redis-subnet-group
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  cacheSubnetGroupName: discourse-redis-subnet-group
+  cacheSubnetGroupDescription: "Discourse Redis subnet group - private subnets in workloads VPC"
+  subnetIDs:
+    - "subnet-02cbec9d02b385c41"
+    - "subnet-0953fbdd06fda6d54"
+  tags:
+    - key: project
+      value: discourse
+    - key: managed-by
+      value: ack
+---
+apiVersion: elasticache.services.k8s.aws/v1alpha1
+kind: ReplicationGroup
+metadata:
+  name: discourse-redis
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  replicationGroupID: discourse-redis
+  description: "Discourse Redis - cache + Sidekiq queue"
+  engine: redis
+  engineVersion: "7.1"
+  cacheNodeType: cache.t3.micro
+  numNodeGroups: 1
+  replicasPerNodeGroup: 0
+  cacheSubnetGroupName: discourse-redis-subnet-group
+  securityGroupIDs:
+    - "sg-0ea4b5695515a4b50"  # mzla-eks-workloads01 cluster SG
+  transitEncryptionEnabled: true
+  atRestEncryptionEnabled: true
+  automaticFailoverEnabled: false
+  authToken:
+    namespace: discourse
+    name: discourse-redis-credentials
+    key: authToken
+  tags:
+    - key: project
+      value: discourse
+    - key: managed-by
+      value: ack

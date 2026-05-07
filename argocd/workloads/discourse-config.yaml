@@ -1,0 +1,69 @@
+# Non-secret Discourse runtime config. Values that change per-deploy
+# (RDS endpoint, ElastiCache primary endpoint) are placeholders here --
+# update once the ACK-managed services report their addresses.
+#
+# Secrets (DB password, Redis auth, SECRET_KEY_BASE, SMTP user/password)
+# are wired into the Deployments via envFrom referencing the
+# discourse-{db,redis,app,smtp}-credentials Kubernetes Secrets that
+# external-secrets-operator syncs from AWS Secrets Manager.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: discourse-config
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+data:
+  # --- Identity / hostname ---
+  DISCOURSE_HOSTNAME: "discourse.thunderbird.net"
+  DISCOURSE_FORCE_HTTPS: "true"
+  DISCOURSE_NOTIFICATION_EMAIL: "noreply@thunderbird.net"
+  DISCOURSE_CONTACT_EMAIL: "noreply@thunderbird.net"
+  DISCOURSE_DEFAULT_LOCALE: "en"
+
+  # --- Postgres (RDS) ---
+  # PG host is a <TBD> placeholder. ACK does not surface the RDS endpoint
+  # until *after* the DBInstance reconciles, so wave 5 (this ConfigMap +
+  # the web/sidekiq Deployments) cannot resolve it on the first sync.
+  # Bring-up procedure: after wave 3 lands, run
+  #   kubectl get dbinstance discourse-postgres -n discourse \
+  #     -o jsonpath='{.status.endpoint.address}'
+  # and PR the resolved hostname here. See README "Bring-up runbook" §4.
+  # Discourse will CrashLoop until this is patched -- intentional, gated
+  # by the bootstrap Job's PGHOST which must be patched at the same time.
+  DISCOURSE_DB_HOST: "discourse-postgres.<TBD>.eu-central-1.rds.amazonaws.com"
+  DISCOURSE_DB_PORT: "5432"
+  DISCOURSE_DB_NAME: "discourse"
+  DISCOURSE_DB_USERNAME: "discourse_app_user"
+  DISCOURSE_DB_USE_SSL: "true"
+
+  # --- Redis (ElastiCache) ---
+  # Same <TBD> two-phase pattern as DISCOURSE_DB_HOST. Resolve via
+  #   kubectl get replicationgroup discourse-redis -n discourse \
+  #     -o jsonpath='{.status.nodeGroups[0].primaryEndpoint.address}'
+  # then PR the value here. See README "Bring-up runbook" §4.
+  DISCOURSE_REDIS_HOST: "discourse-redis.<TBD>.cache.amazonaws.com"
+  DISCOURSE_REDIS_PORT: "6379"
+  DISCOURSE_REDIS_USE_SSL: "true"
+
+  # --- S3 uploads (IRSA, no static keys) ---
+  DISCOURSE_USE_S3: "true"
+  DISCOURSE_S3_REGION: "eu-central-1"
+  DISCOURSE_S3_UPLOAD_BUCKET: "mzla-discourse-uploads"
+  DISCOURSE_S3_USE_IAM_PROFILE: "true"
+  DISCOURSE_S3_HTTP_CONTINUE_TIMEOUT: "5"
+
+  # --- SMTP (SES eu-central-1) ---
+  DISCOURSE_SMTP_ADDRESS: "email-smtp.eu-central-1.amazonaws.com"
+  DISCOURSE_SMTP_PORT: "587"
+  DISCOURSE_SMTP_AUTHENTICATION: "login"
+  DISCOURSE_SMTP_ENABLE_START_TLS: "true"
+  DISCOURSE_SMTP_DOMAIN: "thunderbird.net"
+
+  # --- Sidekiq / web tuning ---
+  UNICORN_WORKERS: "3"
+  DISCOURSE_DB_POOL: "8"
+
+  # --- Misc ---
+  DISCOURSE_ENABLE_CORS: "true"
+  DISCOURSE_SERVE_STATIC_ASSETS: "true"

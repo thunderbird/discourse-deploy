@@ -1,0 +1,35 @@
+# Cloudflare-managed tunnel + binding routing discourse.thunderbird.net
+# to the discourse-web Service. Mirrors twenty-deploy/argocd/workloads/
+# cloudflare-tunnel.yaml.
+apiVersion: networking.cfargotunnel.com/v1alpha2
+kind: Tunnel
+metadata:
+  name: discourse-tunnel
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  newTunnel:
+    name: discourse-mzla-eks-workloads01
+  cloudflare:
+    domain: thunderbird.net
+    secret: cloudflare-secrets
+    accountId: "407a3cd7b36b3ec71bf765856c90ae8c"
+---
+apiVersion: networking.cfargotunnel.com/v1alpha1
+kind: TunnelBinding
+metadata:
+  name: discourse-web-binding
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+subjects:
+  - kind: Service
+    name: discourse-web
+    spec:
+      fqdn: discourse.thunderbird.net
+      protocol: http
+      target: http://discourse-web.discourse.svc:80
+tunnelRef:
+  kind: Tunnel
+  name: discourse-tunnel
