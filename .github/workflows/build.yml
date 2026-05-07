@@ -19,15 +19,28 @@ env:
 
 jobs:
   build:
-    # ARM64 runner: mzla-eks-workloads01 default node groups (system,
-    # general-arm64) are Graviton; the general-amd64 nodegroup has an
-    # arch=amd64:NoSchedule taint, so an x86 image won't get a node by default.
+    # ARM64 runner: workloads01 default node groups are Graviton (m7g);
+    # the amd64 nodegroup has an arch=amd64:NoSchedule taint, so an x86
+    # image won't get scheduled. discourse_docker's launcher bootstraps
+    # for the host arch -- arm runner produces an arm64 image directly.
     runs-on: ubuntu-24.04-arm
     # OIDC trust requires the Environment claim.
     environment: production
     steps:
       - name: Checkout discourse-deploy
         uses: actions/checkout@v4
+        with:
+          path: deploy
+
+      - name: Checkout discourse_docker
+        uses: actions/checkout@v4
+        with:
+          repository: discourse/discourse_docker
+          path: launcher
+          ref: main
+
+      - name: Stage app.yml
+        run: cp deploy/container/containers/app.yml launcher/containers/app.yml
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -38,25 +51,17 @@ jobs:
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Bootstrap Discourse
+        working-directory: launcher
+        run: sudo ./launcher bootstrap app
+
       - name: Determine tag
         id: tag
         run: echo "tag=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: container
-          file: container/Dockerfile
-          platforms: linux/arm64
-          push: true
-          tags: |
-            ${{ env.ECR_REPO }}:${{ steps.tag.outputs.tag }}
-            ${{ env.ECR_REPO }}:latest
-          # arm64 runner builds an arm64 image natively (no QEMU needed).
-          provenance: false
-          sbom: false
-          cache-from: type=registry,ref=${{ env.ECR_REPO }}:buildcache
-          cache-to: type=registry,ref=${{ env.ECR_REPO }}:buildcache,mode=max
+      - name: Tag and push
+        run: |
+          sudo docker tag local_discourse/app:latest "$ECR_REPO:${{ steps.tag.outputs.tag }}"
+          sudo docker tag local_discourse/app:latest "$ECR_REPO:latest"
+          sudo docker push "$ECR_REPO:${{ steps.tag.outputs.tag }}"
+          sudo docker push "$ECR_REPO:latest"
