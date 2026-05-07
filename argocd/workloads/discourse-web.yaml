@@ -51,7 +51,7 @@ spec:
             - name: http
               containerPort: 80
             - name: metrics
-              containerPort: 7001  # discourse-prometheus plugin port
+              containerPort: 9405  # discourse-prometheus plugin default port
           envFrom:
             - configMapRef:
                 name: discourse-config

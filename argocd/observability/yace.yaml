@@ -1,0 +1,182 @@
+# Yet Another CloudWatch Exporter (YACE) for Discourse's AWS-managed
+# resources. Scrapes CloudWatch via IRSA, exposes Prometheus metrics
+# at :5000/metrics. Pulled into VictoriaMetrics by the VMPodScrape
+# below.
+#
+# Mirrors the bitergia + twenty YACE patterns (single Deployment +
+# ConfigMap + SA + scrape) so dashboards built across apps share
+# metric names + label conventions.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: yace
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    eks.amazonaws.com/role-arn: arn:aws:iam::668807881758:role/workloads-prod-yace-discourse
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yace-config
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+data:
+  config.yaml: |
+    # Discovery jobs filter on AWS resource tags (project=discourse) so
+    # YACE picks up only Discourse-owned resources. The ACK manifests
+    # in this repo tag every AWS resource with project: discourse.
+    discovery:
+      jobs:
+        - type: AWS/RDS
+          regions: [eu-central-1]
+          period: 300
+          length: 300
+          searchTags:
+            - key: project
+              value: discourse
+          dimensionNameRequirements: [DBInstanceIdentifier]
+          metrics:
+            - name: CPUUtilization
+              statistics: [Average]
+            - name: FreeableMemory
+              statistics: [Average]
+            - name: FreeStorageSpace
+              statistics: [Average]
+            - name: DatabaseConnections
+              statistics: [Sum]
+            - name: ReadLatency
+              statistics: [Average]
+            - name: WriteLatency
+              statistics: [Average]
+            - name: ReadIOPS
+              statistics: [Average]
+            - name: WriteIOPS
+              statistics: [Average]
+            - name: NetworkReceiveThroughput
+              statistics: [Average]
+            - name: NetworkTransmitThroughput
+              statistics: [Average]
+            - name: BurstBalance
+              statistics: [Average]
+            - name: SwapUsage
+              statistics: [Average]
+        - type: AWS/ElastiCache
+          regions: [eu-central-1]
+          period: 300
+          length: 300
+          searchTags:
+            - key: project
+              value: discourse
+          dimensionNameRequirements: [CacheClusterId]
+          metrics:
+            - name: CPUUtilization
+              statistics: [Average]
+            - name: EngineCPUUtilization
+              statistics: [Average]
+            - name: FreeableMemory
+              statistics: [Average]
+            - name: BytesUsedForCache
+              statistics: [Average]
+            - name: CurrConnections
+              statistics: [Average]
+            - name: CacheHits
+              statistics: [Sum]
+            - name: CacheMisses
+              statistics: [Sum]
+            - name: NetworkBytesIn
+              statistics: [Average]
+            - name: NetworkBytesOut
+              statistics: [Average]
+            - name: Evictions
+              statistics: [Sum]
+        - type: AWS/S3
+          regions: [eu-central-1]
+          period: 86400          # S3 bucket-size metrics are daily
+          length: 86400
+          searchTags:
+            - key: project
+              value: discourse
+          metrics:
+            - name: BucketSizeBytes
+              statistics: [Average]
+            - name: NumberOfObjects
+              statistics: [Average]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yace
+  namespace: discourse
+  labels:
+    app: yace
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yace
+  template:
+    metadata:
+      labels:
+        app: yace
+    spec:
+      serviceAccountName: yace
+      containers:
+        - name: yace
+          image: quay.io/prometheuscommunity/yet-another-cloudwatch-exporter:v0.64.0
+          args:
+            - --config.file=/config/config.yaml
+            - --listen-address=:5000
+          ports:
+            - name: metrics
+              containerPort: 5000
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: yace-config
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: yace
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  namespaceSelector:
+    matchNames: [discourse]
+  selector:
+    matchLabels:
+      app: yace
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      # Match YACE's CloudWatch poll cadence; scraping faster wastes
+      # samples since YACE only refreshes its cache every 'period'.
+      interval: 300s
