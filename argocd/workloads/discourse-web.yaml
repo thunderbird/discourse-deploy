@@ -37,6 +37,12 @@ spec:
         - name: discourse
           image: 668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:latest
           imagePullPolicy: Always
+          # discourse_docker images don't set CMD to /sbin/boot at the
+          # Dockerfile level; without an explicit command pups runs
+          # with no config and crashes ("Reading from stdin" + nil
+          # config). /sbin/boot starts runit + Puma the way launcher
+          # does at runtime.
+          command: ["/sbin/boot"]
           ports:
             - name: http
               containerPort: 3000
@@ -91,8 +97,12 @@ spec:
             periodSeconds: 30
             failureThreshold: 5
           resources:
+            # 250m fits 2 web replicas + sidekiq on the existing
+            # Graviton nodegroup (m7g.large = 2 vCPU each, 4 nodes,
+            # ~1.5 vCPU schedulable per node after kube-system).
+            # Bump back to 500m once the cluster has more capacity.
             requests:
-              cpu: "500m"
+              cpu: "250m"
               memory: "1.5Gi"
             limits:
               memory: "3Gi"
