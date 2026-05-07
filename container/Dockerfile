@@ -67,24 +67,20 @@ RUN bundle config set --local deployment 'true' \
 
 # Precompile assets.
 #
-# Two flags do the heavy lifting at build time:
+# DISCOURSE_SECRET_KEY_BASE: the secret_token initializer calls
+# safe_secret_key_base, which falls back to reading SECRET_TOKEN from
+# Redis if the env value doesn't match VALID_SECRET_KEY = /\A[0-9a-f]{128}\z/.
+# DISCOURSE_SKIP_REDIS does NOT help -- skip_redis? reads a class attr
+# (@skip_redis), not the env var. The reliable fix is to provide a
+# build-time placeholder that *does* match the regex; 128 zero hex chars
+# satisfy it. Runtime overrides this from discourse-app-secrets.
+# Source: app/models/global_setting.rb safe_secret_key_base, v3.4.4.
 #
-# - SKIP_DB_AND_REDIS_PLUGIN_BUILD=1 (set in ENV above) -- skips plugin
-#   code paths that would otherwise need a live DB/Redis.
-# - DISCOURSE_SKIP_REDIS=1 -- makes GlobalSetting.skip_redis? return true.
-#   secret_token initializer calls safe_secret_key_base, which falls
-#   back to Redis to read SECRET_TOKEN if DISCOURSE_SECRET_KEY_BASE is
-#   blank OR doesn't match VALID_SECRET_KEY (=/\A[0-9a-f]{128}\z/).
-#   With skip_redis=1 it short-circuits to SecureRandom.hex(64) instead
-#   -- no Redis connection attempted.
-#   Source: app/models/global_setting.rb safe_secret_key_base in v3.4.4.
-# - DB_HOST/USERNAME/PASSWORD inlined as harmless placeholders too, in
-#   case any other initializer touches those configs (no connection is
-#   attempted at this stage).
-#
-# Runtime overrides every value here from the discourse-config ConfigMap
-# and discourse-{db,redis,app}-credentials Secrets.
-RUN DISCOURSE_SKIP_REDIS=1 \
+# DB_HOST/USERNAME/PASSWORD inlined as harmless placeholders in case
+# downstream initializers touch those configs (no connection is
+# attempted at precompile -- if one ever is, it'll surface as a new
+# build failure to address then).
+RUN DISCOURSE_SECRET_KEY_BASE=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 \
     DISCOURSE_DB_HOST=localhost \
     DISCOURSE_DB_USERNAME=discourse \
     DISCOURSE_DB_PASSWORD=placeholder \
