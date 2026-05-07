@@ -67,11 +67,14 @@ spec:
               fi
 
               echo "Setting password for ${APP_USER}..."
-              # Use psql variable interpolation (:'app_pw') so psql handles
-              # quoting/escaping; safer than embedding ${APP_PASSWORD} via
-              # shell expansion if the value ever contains '$ or backticks.
-              psql -v ON_ERROR_STOP=1 -v "app_pw=${APP_PASSWORD}" \
-                -c "ALTER USER ${APP_USER} WITH PASSWORD :'app_pw'"
+              # Pass via stdin so psql does the substitution properly --
+              # `-c "ALTER ... :'app_pw'"` doesn't process :'name' refs
+              # the same way scripted SQL does (errors with "syntax error at
+              # or near :"). Safe with alphanumeric Pulumi RandomPassword
+              # values (special=False).
+              psql -v ON_ERROR_STOP=1 -v "app_pw=${APP_PASSWORD}" <<SQL
+              ALTER USER ${APP_USER} WITH PASSWORD :'app_pw';
+              SQL
 
               echo "Granting database + public schema privileges..."
               psql -v ON_ERROR_STOP=1 <<SQL
