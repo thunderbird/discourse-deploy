@@ -23,16 +23,6 @@ ENV RAILS_ENV=production \
     DISCOURSE_VERSION=${DISCOURSE_VERSION} \
     SKIP_DB_AND_REDIS_PLUGIN_BUILD=1
 
-# Build-time placeholder for DISCOURSE_SECRET_KEY_BASE: without it,
-# config/initializers/100-secret_token.rb falls through to
-# GlobalSetting.safe_secret_key_base, which tries to read the value
-# from Redis ("Couldn't connect to Redis on localhost:6379" during
-# precompile). Satisfying the env check skips the Redis path. Runtime
-# overrides this from the discourse-app-secrets ExternalSecret.
-# Must be a separate ENV directive -- comments inside multi-line ENV
-# blocks aren't parsed and break the directive silently.
-ENV DISCOURSE_SECRET_KEY_BASE=build_time_placeholder_overridden_at_runtime
-
 USER root
 WORKDIR /var/www
 
@@ -75,10 +65,26 @@ RUN bundle config set --local deployment 'true' \
  && bundle config set --local without 'development test' \
  && bundle install --jobs $(nproc) --retry 3
 
-# Precompile assets. SKIP_DB_AND_REDIS_PLUGIN_BUILD=1 (set above) tells
-# Discourse to bypass plugin code paths that would otherwise require a
-# live DB or Redis at this point.
-RUN bundle exec rake assets:precompile
+# Precompile assets.
+#
+# - SKIP_DB_AND_REDIS_PLUGIN_BUILD=1 (set in ENV) tells Discourse to
+#   bypass plugin code paths that would otherwise require live DB/Redis.
+# - DISCOURSE_SECRET_KEY_BASE inlined here (not via ENV) because Docker
+#   ENV propagation through buildx + USER discourse + bundle exec was
+#   inconsistent; an inline env in the RUN command is unambiguous. The
+#   placeholder is overridden at runtime from discourse-app-secrets.
+#   Without it, config/initializers/100-secret_token.rb falls through
+#   to GlobalSetting.safe_secret_key_base which reads from Redis and
+#   fails with "Couldn't connect to Redis on localhost:6379".
+# - DB_HOST/REDIS_HOST/DB_PASSWORD inlined as harmless placeholders too,
+#   in case any other initializer (e.g. ActiveRecord pool warmup) needs
+#   them set even if no connection is attempted.
+RUN DISCOURSE_SECRET_KEY_BASE=build_time_placeholder \
+    DISCOURSE_DB_HOST=localhost \
+    DISCOURSE_DB_USERNAME=discourse \
+    DISCOURSE_DB_PASSWORD=placeholder \
+    DISCOURSE_REDIS_HOST=localhost \
+    bundle exec rake assets:precompile
 
 USER root
 # Strip apt + tmp cruft to keep the layer lean.
