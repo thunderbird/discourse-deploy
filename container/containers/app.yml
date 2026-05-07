@@ -20,10 +20,16 @@ templates:
   - "templates/web.template.yml"
   - "templates/web.ratelimited.template.yml"
 
-# No plugin clone hooks: discourse-openid-connect and discourse-prometheus
-# are core/bundled plugins shipped with the base image already. Cloning
-# them into $home/plugins fails with "destination path already exists"
-# during bootstrap.
+# Plugin clones. discourse-openid-connect IS bundled in the base image
+# (visible in admin/plugins as "OpenID Connect") and a clone fails with
+# "destination path already exists". discourse-prometheus is NOT bundled
+# -- has to be cloned in here.
+hooks:
+  after_code:
+    - exec:
+        cd: $home/plugins
+        cmd:
+          - git clone --depth 1 https://github.com/discourse/discourse-prometheus.git
 
 env:
   LANG: en_US.UTF-8
