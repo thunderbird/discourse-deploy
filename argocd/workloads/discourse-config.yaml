@@ -31,7 +31,7 @@ data:
   # and PR the resolved hostname here. See README "Bring-up runbook" §4.
   # Discourse will CrashLoop until this is patched -- intentional, gated
   # by the bootstrap Job's PGHOST which must be patched at the same time.
-  DISCOURSE_DB_HOST: "discourse-postgres.<TBD>.eu-central-1.rds.amazonaws.com"
+  DISCOURSE_DB_HOST: "discourse-postgres.c18simi4g02c.eu-central-1.rds.amazonaws.com"
   DISCOURSE_DB_PORT: "5432"
   DISCOURSE_DB_NAME: "discourse"
   DISCOURSE_DB_USERNAME: "discourse_app_user"
@@ -42,7 +42,7 @@ data:
   #   kubectl get replicationgroup discourse-redis -n discourse \
   #     -o jsonpath='{.status.nodeGroups[0].primaryEndpoint.address}'
   # then PR the value here. See README "Bring-up runbook" §4.
-  DISCOURSE_REDIS_HOST: "discourse-redis.<TBD>.cache.amazonaws.com"
+  DISCOURSE_REDIS_HOST: "master.discourse-redis.tjqh7z.euc1.cache.amazonaws.com"
   DISCOURSE_REDIS_PORT: "6379"
   DISCOURSE_REDIS_USE_SSL: "true"
 
