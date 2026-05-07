@@ -216,37 +216,6 @@ kubectl --context arn:aws:eks:eu-central-1:668807881758:cluster/mzla-eks-workloa
 
 ---
 
-## 6. Gotchas
-
-These bit us during initial bring-up. Read before re-deploying or rebuilding.
-
-- **Image is arm64-only.** workloads01's default node groups are Graviton; the amd64 nodegroup has `arch=amd64:NoSchedule`. The GHA build runs on `ubuntu-24.04-arm` so the image matches. Never `docker tag` an x86 image as `discourse:latest` — it'll silently land but pods won't schedule.
-- **`launcher bootstrap` requires sudo + privileged Docker; `docker push` does NOT.** ECR credentials are configured for the runner user via `amazon-ecr-login`; `sudo docker push` uses root's empty docker config and 401s. Only the bootstrap step uses sudo.
-- **`discourse_docker` requires `templates/postgres.template.yml` and `templates/redis.template.yml` to bootstrap.** Both are needed for `db:migrate` and `assets:precompile` during build, even though we don't use the bundled DB/Redis at runtime. Stripping them breaks bootstrap.
-- **Two-phase deploy.** ACK doesn't surface RDS/Redis endpoints until *after* the resources reconcile, so the first sync ships `<TBD>` placeholders. A follow-up PR (after waiting ~15 min) drops the resolved values in. See bring-up step 5.
-- **Cloudflare credentials shared with twenty.** ExternalSecret `cloudflare-secrets` references `mzla/twenty/cloudflare` (one CF account covers both apps). Don't create `mzla/discourse/cloudflare`.
-- **Sidekiq image == web image.** Same OCI image, different `command:`. Don't fork or rebuild — let the Dockerfile produce one artifact and override entrypoint at the pod level.
-- **Postgres extensions** `hstore`, `pg_trgm`, `vector` (pgvector for AI features) must be created as the master user; the app user lacks `rds_superuser`. `rds-bootstrap-job` handles this.
-- **`discourse-prometheus` must be enabled AND bind-overridden.** The plugin defaults to `localhost:9405`. We bind to `0.0.0.0` via `DISCOURSE_PROMETHEUS_WEBSERVER_BIND=0.0.0.0` in the ConfigMap. Until the plugin is enabled in `Admin → Plugins`, the port doesn't open at all.
-- **Sidekiq pods don't serve `:9405`.** The collector runs on web pods only; sidekiq processes report via IPC to the web collector. Scraping sidekiq pods just creates a permanently-down target. The VMPodScrape selector matches `component=web` only.
-- **psql `-c "... :'app_pw'"` doesn't process variable substitution.** The `:'name'` syntax only works when SQL is read from stdin/`-f`. The bootstrap job uses a heredoc.
-- **`DISCOURSE_SECRET_KEY_BASE` must be 128 hex chars.** The validation regex is `/\A[0-9a-f]{128}\z/`. Pulumi's `RandomPassword(special=False)` produces alphanumeric (a-z, A-Z, 0-9) which **fails** that validation — Discourse logs `WARNING: DISCOURSE_SECRET_KEY_BASE is invalid, it was re-generated` and uses an in-memory random instead. Real-world impact: sessions invalidate on pod restart. Future fix: use a hex-only random generator in Pulumi.
-- **Topicbox import**: Phase 3, separate. Request mbox export from Fastmail, then run `bundle exec rake import:mbox` against a Job mounting the tarball.
-
----
-
-## 7. Theming
+## 6. Theming
 
 The Bolt-styled theme lives in [thunderbird/discourse-theme-bolt](https://github.com/thunderbird/discourse-theme-bolt) (public; v0.1.0). Install via Admin UI → Customize → Themes → "Install from a git repository". Theme covers basic palette + Inter font; full Bolt palette + dark scheme tracked in that repo's TODO.
-
----
-
-## 8. SSO
-
-Phase 1 (current) uses Discourse's built-in user/password. Phase 1.5 (planned) swaps to OIDC against the Thundermail Keycloak realm using the bundled `discourse-openid-connect` plugin — config-only flip:
-
-- Create OIDC client in Keycloak `thunderbird` realm
-- Add `mzla/discourse/oidc` SM secret with client id + client secret
-- Add `DISCOURSE_OPENID_CONNECT_*` env to ConfigMap
-
-Tracked in M5 of the migration epic.
