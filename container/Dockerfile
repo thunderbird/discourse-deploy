@@ -21,13 +21,17 @@ ARG DISCOURSE_VERSION
 
 ENV RAILS_ENV=production \
     DISCOURSE_VERSION=${DISCOURSE_VERSION} \
-    SKIP_DB_AND_REDIS_PLUGIN_BUILD=1 \
-    # Build-time placeholder for DISCOURSE_SECRET_KEY_BASE: without it,
-    # the secret_token initializer falls back to reading the value from
-    # Redis ("Couldn't connect to Redis" during precompile). Satisfying
-    # the env check is enough -- the actual value is overridden at
-    # runtime from the discourse-app-secrets ExternalSecret.
-    DISCOURSE_SECRET_KEY_BASE=build_time_placeholder_overridden_at_runtime
+    SKIP_DB_AND_REDIS_PLUGIN_BUILD=1
+
+# Build-time placeholder for DISCOURSE_SECRET_KEY_BASE: without it,
+# config/initializers/100-secret_token.rb falls through to
+# GlobalSetting.safe_secret_key_base, which tries to read the value
+# from Redis ("Couldn't connect to Redis on localhost:6379" during
+# precompile). Satisfying the env check skips the Redis path. Runtime
+# overrides this from the discourse-app-secrets ExternalSecret.
+# Must be a separate ENV directive -- comments inside multi-line ENV
+# blocks aren't parsed and break the directive silently.
+ENV DISCOURSE_SECRET_KEY_BASE=build_time_placeholder_overridden_at_runtime
 
 USER root
 WORKDIR /var/www
