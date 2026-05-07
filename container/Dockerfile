@@ -80,7 +80,10 @@ RUN bundle config set --local deployment 'true' \
 # downstream initializers touch those configs (no connection is
 # attempted at precompile -- if one ever is, it'll surface as a new
 # build failure to address then).
-RUN DISCOURSE_SECRET_KEY_BASE=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 \
+# Placeholder must contain at least one hex letter (a-f) so the Provider's
+# coerce logic doesn't auto-cast it to Integer (which trips
+# `token !~ VALID_SECRET_KEY` with NoMethodError on Integer#=~).
+RUN DISCOURSE_SECRET_KEY_BASE=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
     DISCOURSE_DB_HOST=localhost \
     DISCOURSE_DB_USERNAME=discourse \
     DISCOURSE_DB_PASSWORD=placeholder \
