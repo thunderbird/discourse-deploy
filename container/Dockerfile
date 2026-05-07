@@ -67,19 +67,24 @@ RUN bundle config set --local deployment 'true' \
 
 # Precompile assets.
 #
-# - SKIP_DB_AND_REDIS_PLUGIN_BUILD=1 (set in ENV) tells Discourse to
-#   bypass plugin code paths that would otherwise require live DB/Redis.
-# - DISCOURSE_SECRET_KEY_BASE inlined here (not via ENV) because Docker
-#   ENV propagation through buildx + USER discourse + bundle exec was
-#   inconsistent; an inline env in the RUN command is unambiguous. The
-#   placeholder is overridden at runtime from discourse-app-secrets.
-#   Without it, config/initializers/100-secret_token.rb falls through
-#   to GlobalSetting.safe_secret_key_base which reads from Redis and
-#   fails with "Couldn't connect to Redis on localhost:6379".
-# - DB_HOST/REDIS_HOST/DB_PASSWORD inlined as harmless placeholders too,
-#   in case any other initializer (e.g. ActiveRecord pool warmup) needs
-#   them set even if no connection is attempted.
-RUN DISCOURSE_SECRET_KEY_BASE=build_time_placeholder \
+# Two flags do the heavy lifting at build time:
+#
+# - SKIP_DB_AND_REDIS_PLUGIN_BUILD=1 (set in ENV above) -- skips plugin
+#   code paths that would otherwise need a live DB/Redis.
+# - DISCOURSE_SKIP_REDIS=1 -- makes GlobalSetting.skip_redis? return true.
+#   secret_token initializer calls safe_secret_key_base, which falls
+#   back to Redis to read SECRET_TOKEN if DISCOURSE_SECRET_KEY_BASE is
+#   blank OR doesn't match VALID_SECRET_KEY (=/\A[0-9a-f]{128}\z/).
+#   With skip_redis=1 it short-circuits to SecureRandom.hex(64) instead
+#   -- no Redis connection attempted.
+#   Source: app/models/global_setting.rb safe_secret_key_base in v3.4.4.
+# - DB_HOST/USERNAME/PASSWORD inlined as harmless placeholders too, in
+#   case any other initializer touches those configs (no connection is
+#   attempted at this stage).
+#
+# Runtime overrides every value here from the discourse-config ConfigMap
+# and discourse-{db,redis,app}-credentials Secrets.
+RUN DISCOURSE_SKIP_REDIS=1 \
     DISCOURSE_DB_HOST=localhost \
     DISCOURSE_DB_USERNAME=discourse \
     DISCOURSE_DB_PASSWORD=placeholder \
