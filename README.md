@@ -18,7 +18,7 @@ Discourse is a Rails (Ruby 3.4) forum platform. Upstream officially supports Doc
 
 | Component | Image | Purpose |
 |-----------|-------|---------|
-| `discourse-web` | `668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:v0.1.2` | nginx → Puma + Rails on `:80`. 2 replicas. discourse-prometheus collector on `:9405` (pod-network only). |
+| `discourse-web` | `668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:v0.1.3` | nginx → Puma + Rails on `:80`. 2 replicas. discourse-prometheus collector on `:9405` (pod-network only). |
 | `discourse-sidekiq` | same image, `bundle exec sidekiq` | Background jobs (mail, search index, digest). Reports metrics to web's collector via IPC. 1 replica. |
 | `discourse-tunnel` | `cloudflare/cloudflared` (managed by `cloudflare-operator`) | Outbound tunnel. Zero inbound ports. |
 | `discourse-postgres` (RDS) | `postgres:16.6` (AWS RDS) | Application database. 7-day automated backup retention. |
