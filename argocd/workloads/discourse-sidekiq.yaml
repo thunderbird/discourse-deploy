@@ -31,7 +31,7 @@ spec:
       serviceAccountName: default
       containers:
         - name: sidekiq
-          image: 668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:v0.1.3
+          image: 668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:latest
           imagePullPolicy: Always
           command:
             - /bin/bash
