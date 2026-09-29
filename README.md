@@ -6,7 +6,9 @@ It is the planned replacement for Topicbox. Data migration from Topicbox is a la
 
 > **Audience:** SREs landing here for the first time should read *Architecture* + *Where things live* to understand the system. Senior SREs should jump to *Operational notes* + *Gotchas* for the things that bit us during initial deployment.
 
-**Source of truth for the deployment plan and decision history:** [thunderbird/platform-infrastructure#279](https://github.com/thunderbird/platform-infrastructure/issues/279) (epic), [#280](https://github.com/thunderbird/platform-infrastructure/pull/280) (initial Pulumi), [#285](https://github.com/thunderbird/platform-infrastructure/pull/285) (ECR + GHA OIDC), [#287](https://github.com/thunderbird/platform-infrastructure/pull/287) (YACE IRSA).
+**Source of truth.** This README owns how to build and run the deployment, plus the bring-up runbook. Cross-repo wiring, estate context and dated findings about the *running* system live in [`docs/discourse.md`](https://github.com/thunderbird/platform-infrastructure/blob/main/docs/discourse.md); authentication lives in [`docs/discourse-auth.md`](https://github.com/thunderbird/platform-infrastructure/blob/main/docs/discourse-auth.md). Where this README and the running system disagree, **the running system wins** — settings here describe the intended design.
+
+Build history: [#280](https://github.com/thunderbird/platform-infrastructure/pull/280) (initial Pulumi), [#285](https://github.com/thunderbird/platform-infrastructure/pull/285) (ECR + GHA OIDC), [#287](https://github.com/thunderbird/platform-infrastructure/pull/287) (YACE IRSA). The original epic [#279](https://github.com/thunderbird/platform-infrastructure/issues/279) is **closed with phases 2 (Bolt re-theme) and 3 (Topicbox import) never completed** — do not read it as a statement of current state.
 
 ---
 
@@ -166,6 +168,7 @@ Order matters because the ACK CRDs report endpoints in their `status` only **aft
    ```
 9. **Enable discourse-prometheus**: Admin → Plugins → discourse-prometheus → toggle on. Pod `:9405` starts serving metrics; VMAgent scrapes within 30s.
 10. **Install the Bolt theme**: Admin → Customize → Themes → Install from a git repository → `https://github.com/thunderbird/discourse-theme-bolt`, tag `v0.1.0`. Set as default.
+11. **Re-enter the authentication config.** Auth is database state, so a fresh site comes up with **no OAuth providers and no client credentials** — see [Authentication](#7-authentication). This step cannot be skipped for a DR rebuild: local login alone will not let existing users back in.
 
 ---
 
@@ -221,3 +224,55 @@ kubectl --context arn:aws:eks:eu-central-1:668807881758:cluster/mzla-eks-workloa
 ## 6. Theming
 
 The Bolt-styled theme lives in [thunderbird/discourse-theme-bolt](https://github.com/thunderbird/discourse-theme-bolt) (public; v0.1.0). Install via Admin UI → Customize → Themes → "Install from a git repository". Theme covers basic palette + Inter font; full Bolt palette + dark scheme tracked in that repo's TODO.
+
+---
+
+## 7. Authentication
+
+Restores the section dropped in PR #15, rewritten to what actually shipped. The full runbook — break-glass, rollback, account matching, and why Discourse ID was rejected — is [`docs/discourse-auth.md`](https://github.com/thunderbird/platform-infrastructure/blob/main/docs/discourse-auth.md) in `platform-infrastructure`. This section covers only what someone rebuilding *this* deployment needs.
+
+### What is enabled
+
+| Method | Setting | Where the credentials are |
+|---|---|---|
+| GitHub OAuth | `enable_github_logins` | OAuth App under the **`thunderbird` GitHub org** (Settings → Developer settings → OAuth Apps). Callback `https://discourse.thunderbird.net/auth/github/callback` |
+| Google OAuth | `enable_google_oauth2_logins` | GCP project **`thunderbird-discourse`** in the mozilla.com org (`1047413191847`). Callback `https://discourse.thunderbird.net/auth/google_oauth2/callback` |
+| Local password | `enable_local_logins` | Discourse's own user table. **Keep this on** — it is the break-glass path |
+| Email magic link | `enable_local_logins_via_email` | Rides SES (`eu-central-1`, `noreply@thunderbird.net`) |
+
+**Discourse ID is not used** (`enable_discourse_id` false) and neither is DiscourseConnect. The earlier plan to swap to OIDC against a Keycloak realm did not happen either.
+
+### None of this is in git, and that is not fixable here
+
+Discourse stores auth settings — **including both OAuth client secrets** — as rows in the RDS `site_settings` table. `enable_*_logins` has no entry in `config/discourse_defaults.conf`, so there is **no `DISCOURSE_*` env var for it**: adding one to `discourse-config.yaml` is a silent no-op that ArgoCD still reports as Synced and Healthy. Do not try.
+
+Consequences:
+
+- **A fresh cluster or DR rebuild comes up with authentication unconfigured** (runbook step 11). The live values exist only inside the RDS snapshot.
+- **Never commit the client IDs or secrets to this repo.** It is public-facing config; the secrets belong in the admin UI only.
+- Rotation is two-sided and manual: rotate at the provider, then set the new value in Discourse. Nothing syncs them, and nothing alerts when they diverge — the symptom is every login through that provider failing at once.
+
+### Setting or restoring it
+
+Admin → Login & authentication, or from a Rails console in a web pod:
+
+```
+POD=$(kubectl get pod -n discourse -l app.kubernetes.io/component=web -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -it -n discourse "$POD" -- bash -lc 'cd /var/www/discourse && su discourse -c "bundle exec rails c"'
+```
+
+```ruby
+SiteSetting.github_client_id = "..."
+SiteSetting.github_client_secret = "..."
+SiteSetting.enable_github_logins = true
+SiteSetting.google_oauth2_client_id = "..."
+SiteSetting.google_oauth2_client_secret = "..."
+SiteSetting.enable_google_oauth2_logins = true
+```
+
+### If nobody can log in
+
+1. Local password login at `/login` — always on, independent of both providers. Note an account created *through* GitHub or Google has no password until it resets one, and reset mail needs SES.
+2. `/u/admin-login` magic link (SES again).
+3. The Rails console above; or `RAILS_ENV=production bundle exec rake admin:create` in a web pod. Discourse's documented `./launcher enter app` rescue **does not exist here** — there is no launcher at runtime.
+4. Never leave the site with zero login methods enabled; Discourse's "No login methods are configured" state is recoverable only from that console.
