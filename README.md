@@ -18,7 +18,7 @@ Discourse is a Rails (Ruby 3.4) forum platform. Upstream officially supports Doc
 
 | Component | Image | Purpose |
 |-----------|-------|---------|
-| `discourse-web` | `668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:v0.1.3` | nginx → Puma + Rails on `:80`. 2 replicas. discourse-prometheus collector on `:9405` (pod-network only). |
+| `discourse-web` | `668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:latest` | nginx → Puma + Rails on `:80`. 2 replicas. discourse-prometheus collector on `:9405` (pod-network only). |
 | `discourse-sidekiq` | same image, `bundle exec sidekiq` | Background jobs (mail, search index, digest). Reports metrics to web's collector via IPC. 1 replica. |
 | `discourse-tunnel` | `cloudflare/cloudflared` (managed by `cloudflare-operator`) | Outbound tunnel. Zero inbound ports. |
 | `discourse-postgres` (RDS) | `postgres:16.6` (AWS RDS) | Application database. 7-day automated backup retention. |
@@ -115,8 +115,8 @@ discourse-deploy/
 │   │   ├── default-serviceaccount.yaml             IRSA annotation overlay (S3 access)
 │   │   ├── rds-bootstrap-job.yaml                  CREATE USER + GRANTs + hstore + pg_trgm + vector
 │   │   ├── discourse-config.yaml                   ConfigMap of DISCOURSE_* env
-│   │   ├── discourse-web.yaml                      Deployment + Service for nginx+Puma (image pinned)
-│   │   ├── discourse-sidekiq.yaml                  Deployment for Sidekiq workers (image pinned)
+│   │   ├── discourse-web.yaml                      Deployment + Service for nginx+Puma (image `:latest`)
+│   │   ├── discourse-sidekiq.yaml                  Deployment for Sidekiq workers (image `:latest`)
 │   │   ├── discourse-migrate-job.yaml              Sync-hook Job: bundle exec rake db:migrate
 │   │   └── cloudflare-tunnel.yaml                  Tunnel + TunnelBinding (discourse.thunderbird.net)
 │   └── observability/
@@ -173,11 +173,13 @@ Order matters because the ACK CRDs report endpoints in their `status` only **aft
 
 ### Image upgrades
 
-The `image:` field in `argocd/workloads/discourse-{web,sidekiq,migrate-job}.yaml` is pinned to a specific `v0.1.x` tag (not `:latest`) so a tag-triggered build doesn't auto-replace running pods on restart. To roll a new image:
+The `image:` field in `argocd/workloads/discourse-{web,sidekiq,migrate-job}.yaml` tracks `:latest` with `imagePullPolicy: Always`. Because the manifest doesn't change between builds, ArgoCD won't roll anything on its own, and any pod restart (node drain, eviction, crash) pulls whatever `:latest` currently points at. To roll a new image:
 
-1. Tag this repo `v0.1.x` — GHA builds and pushes
-2. PR a manifest bump (`v0.1.{x-1}` → `v0.1.x`) in all three places
-3. ArgoCD rolls
+1. Tag this repo `v0.1.x` — GHA builds and pushes `:v0.1.x` and `:latest`
+2. Run migrations: trigger an ArgoCD sync of the discourse app (the `discourse-db-migrate` Sync hook re-runs on every sync)
+3. Restart the workloads: `kubectl rollout restart deploy/discourse-web deploy/discourse-sidekiq -n discourse`
+
+To roll back, pin the three manifests to a known-good `v0.1.x` tag.
 
 ### Adding admins
 
