@@ -47,7 +47,7 @@ sender MTA --MX--> inbound-smtp.eu-central-1.amazonaws.com  (SES, receipt rule s
 
 ## What has to go elsewhere (not in this PR)
 
-### platform-infrastructure Pulumi (`pulumi/environments/mzla-workloads/config.prod.yaml`)
+### platform-infrastructure Pulumi ([platform-infrastructure#1510](https://github.com/thunderbird/platform-infrastructure/pull/1510), `pulumi/environments/mzla-workloads`)
 1. IRSA role next to `discourse-default`:
    ```yaml
        discourse-mail-bridge:
@@ -65,7 +65,7 @@ sender MTA --MX--> inbound-smtp.eu-central-1.amazonaws.com  (SES, receipt rule s
 3. SES receipt rule set `discourse-inbound`, rule `discourse-replies`: recipients `discourse.thunderbird.net`, `ScanEnabled: true`, `TlsPolicy: Require`, one `S3Action` (bucket `mzla-discourse-inbound`, prefix `incoming/`), **then activate the rule set** (only one rule set can be active per account and region; workloads/eu-central-1 has none today). No `LambdaAction` (the k9forum rule has one that errors on every message).
 4. SES receiving needs a verified identity for the recipient domain. `thunderbird.net` is a verified domain identity in this account and region. Confirm it covers the `discourse.` subdomain for receiving; if not, add a `discourse.thunderbird.net` domain identity (Easy DKIM CNAMEs). This touches only workloads-account SES, not Thundermail identities (contract with brief B2/#6).
 
-Merge order: Pulumi PR **first** (role and secret), then this PR. Otherwise the ExternalSecret shows `SecretSyncedError` and the Argo app goes Degraded.
+Merge order: #1510 **first** (role and secret; its SES flags `receipt_rule`/`active` start `false`), then this PR. Otherwise the ExternalSecret shows `SecretSyncedError` and the Argo app goes Degraded. The receipt rule comes after this PR because SES test-writes the bucket when the rule is created.
 
 ### DNS (thunderbird.net zone, Cloudflare): a change, Matthew's go
 | Name | Type | Value | Notes |
@@ -92,11 +92,11 @@ API key: Admin -> API -> New -> user `system`, **Granular** scope `email: receiv
 
 ### Go-live sequence (each step is a live change and needs Matthew's go)
 0. **Gate:** not while the Topicbox imports ([#22](https://github.com/thunderbird/PE-Routing/issues/22)/[#23](https://github.com/thunderbird/PE-Routing/issues/23)) are pending. Imports run with outbound email disabled, and inbound shouldn't be live either.
-1. Merge the platform-infrastructure Pulumi PR (role, secret shell, receipt rule set, kept *inactive* until step 5).
-2. Merge this PR. Argo creates the bucket and the ExternalSecret; the bridge stays at 0 replicas.
+1. Merge [platform-infrastructure#1510](https://github.com/thunderbird/platform-infrastructure/pull/1510) (role and secret shell; SES flags off).
+2. Merge this PR. Argo creates the bucket and the ExternalSecret; the bridge stays at 0 replicas. Then a small Pulumi PR sets `discourse_inbound.receipt_rule: true` (rule set and rule created, still inactive).
 3. Create the API key and put it in SM. Set the site settings above.
 4. Scale the bridge to 1 by PR (`replicas: 1`).
-5. Activate the receipt rule set, add the MX.
+5. Pulumi `discourse_inbound.active: true` (activates the rule set), and add the MX.
 6. Verify: send mail to `replies+test@discourse.thunderbird.net`. It should show up under `processed/` and in Admin -> Emails -> Received/Rejected. Then reply by email to a real notification and confirm the post appears. Check the bridge logs (`kubectl -n discourse logs deploy/discourse-mail-bridge`).
 
 ### Rollback
