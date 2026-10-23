@@ -39,7 +39,7 @@ sender MTA --MX--> inbound-smtp.eu-central-1.amazonaws.com  (SES, receipt rule s
            object moved to processed/ (2xx) or failed/ (4xx, or >24 h of 5xx/429)
 ```
 
-## What's in this repo ([this PR](#))
+## What's in this repo ([discourse-deploy#20](https://github.com/thunderbird/discourse-deploy/pull/20))
 
 - `argocd/aws-resources/s3-inbound-bucket.yaml`: ACK Bucket `mzla-discourse-inbound`. SSE-S3, public access blocked, lifecycle (incoming/processed 14 d, failed 60 d), and a bucket policy that only lets this account's `discourse-inbound` receipt rules `PutObject` into `incoming/`.
 - `argocd/secrets/discourse-mail-bridge-credentials.yaml`: ExternalSecret `mzla/discourse/inbound` -> `DISCOURSE_API_KEY`.
