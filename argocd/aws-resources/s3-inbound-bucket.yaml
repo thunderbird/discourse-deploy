@@ -1,5 +1,5 @@
 # S3 bucket that SES email receiving writes raw inbound mail into.
-# Flow: MX discourse.thunderbird.net -> SES inbound (eu-central-1) receipt
+# Flow: MX reply.discourse.thunderbird.net -> SES inbound (eu-central-1) receipt
 # rule -> s3://mzla-discourse-inbound/incoming/ -> discourse-mail-bridge
 # (argocd/workloads/discourse-mail-bridge.yaml) -> Discourse handle_mail.
 # See docs/inbound-email.md.
