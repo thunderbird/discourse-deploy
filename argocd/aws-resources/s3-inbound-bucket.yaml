@@ -1,0 +1,74 @@
+# S3 bucket that SES email receiving writes raw inbound mail into.
+# Flow: MX discourse.thunderbird.net -> SES inbound (eu-central-1) receipt
+# rule -> s3://mzla-discourse-inbound/incoming/ -> discourse-mail-bridge
+# (argocd/workloads/discourse-mail-bridge.yaml) -> Discourse handle_mail.
+# See docs/inbound-email.md.
+#
+# The SES receipt rule set itself is NOT here (no ACK SES controller on
+# workloads01); it lives in platform-infrastructure Pulumi alongside the
+# bridge's IRSA role. Until that rule exists this bucket stays empty.
+#
+# The policy lets only this account's discourse-inbound receipt rule write.
+apiVersion: s3.services.k8s.aws/v1alpha1
+kind: Bucket
+metadata:
+  name: discourse-inbound
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  name: mzla-discourse-inbound
+  encryption:
+    rules:
+      - applyServerSideEncryptionByDefault:
+          sseAlgorithm: AES256
+  publicAccessBlock:
+    blockPublicACLs: true
+    blockPublicPolicy: true
+    ignorePublicACLs: true
+    restrictPublicBuckets: true
+  # Raw mail holds personal data; keep it only as long as it's useful for
+  # debugging. failed/ lives longer so a human can replay it.
+  lifecycle:
+    rules:
+      - id: expire-incoming
+        status: Enabled
+        filter:
+          prefix: incoming/
+        expiration:
+          days: 14
+      - id: expire-processed
+        status: Enabled
+        filter:
+          prefix: processed/
+        expiration:
+          days: 14
+      - id: expire-failed
+        status: Enabled
+        filter:
+          prefix: failed/
+        expiration:
+          days: 60
+  policy: |
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AllowSESPuts",
+          "Effect": "Allow",
+          "Principal": {"Service": "ses.amazonaws.com"},
+          "Action": "s3:PutObject",
+          "Resource": "arn:aws:s3:::mzla-discourse-inbound/incoming/*",
+          "Condition": {
+            "StringEquals": {"AWS:SourceAccount": "668807881758"},
+            "StringLike": {"AWS:SourceArn": "arn:aws:ses:eu-central-1:668807881758:receipt-rule-set/discourse-inbound:receipt-rule/*"}
+          }
+        }
+      ]
+    }
+  tagging:
+    tagSet:
+      - key: project
+        value: discourse
+      - key: managed-by
+        value: ack

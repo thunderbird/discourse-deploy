@@ -1,0 +1,213 @@
+# discourse-mail-bridge: inbound email for discourse.thunderbird.net.
+#
+# SES inbound writes raw RFC822 mail to s3://mzla-discourse-inbound/incoming/.
+# This pod polls that prefix, POSTs each message (base64, `email_encoded`)
+# to Discourse's /admin/email/handle_mail on the in-cluster discourse-web
+# Service, then moves the object to processed/ or failed/. Same contract as
+# the k9forum Lambda (thunderbird/k9forum lambda/handler.py), but in-cluster
+# so it skips the Cloudflare managed challenge in front of the public
+# hostname, and needs no inbound port. See docs/inbound-email.md.
+#
+# replicas: 0 on purpose. Do not scale up until (1) the platform-infrastructure
+# pieces exist (IRSA role, SM secret, SES receipt rule), (2) the Discourse
+# site settings are set, and (3) Matthew OKs enabling inbound mail -- the
+# Topicbox imports (PE-Routing #22/#23) must run first.
+#
+# Image: AWS's Lambda Python base image, used only because it ships boto3
+# (multi-arch, so it runs on the Graviton nodes). Its Lambda entrypoint is
+# overridden with `command`.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: discourse-mail-bridge
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    # Created in platform-infrastructure/pulumi/environments/mzla-workloads
+    # (config.prod.yaml, irsa role "discourse-mail-bridge").
+    eks.amazonaws.com/role-arn: arn:aws:iam::668807881758:role/workloads-prod-discourse-mail-bridge
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: discourse-mail-bridge
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+data:
+  bridge.py: |
+    """Poll S3 for SES-delivered mail and hand it to Discourse handle_mail."""
+    import base64
+    import logging
+    import os
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    from datetime import datetime, timedelta, timezone
+
+    import boto3
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    LOG = logging.getLogger("mail-bridge")
+
+    BUCKET = os.environ["INBOUND_BUCKET"]
+    DISCOURSE_URL = os.environ["DISCOURSE_URL"].rstrip("/")
+    DISCOURSE_HOST = os.environ["DISCOURSE_HOST"]
+    API_KEY = os.environ["DISCOURSE_API_KEY"]
+    API_USERNAME = os.environ.get("DISCOURSE_API_USERNAME", "system")
+    POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "30"))
+    # Transient failures (429, 5xx, network) stay in incoming/ and retry each
+    # poll; give up and park in failed/ once a message is this old.
+    MAX_AGE = timedelta(hours=int(os.environ.get("MAX_RETRY_HOURS", "24")))
+    HEARTBEAT = "/tmp/heartbeat"
+
+    s3 = boto3.client("s3")
+
+
+    def post(raw: bytes) -> tuple[int, str]:
+        body = urllib.parse.urlencode({"email_encoded": base64.b64encode(raw).decode("ascii")}).encode()
+        req = urllib.request.Request(
+            f"{DISCOURSE_URL}/admin/email/handle_mail",
+            data=body,
+            method="POST",
+            headers={
+                "Host": DISCOURSE_HOST,
+                "X-Forwarded-Proto": "https",
+                "Api-Key": API_KEY,
+                "Api-Username": API_USERNAME,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.status, resp.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode("utf-8", "replace")
+        except (urllib.error.URLError, TimeoutError) as exc:
+            return 0, str(exc)
+
+
+    def move(key: str, prefix: str) -> None:
+        dst = prefix + key.split("/", 1)[1]
+        s3.copy_object(Bucket=BUCKET, Key=dst, CopySource={"Bucket": BUCKET, "Key": key})
+        s3.delete_object(Bucket=BUCKET, Key=key)
+        LOG.info("moved %s -> %s", key, dst)
+
+
+    def poll_once() -> None:
+        pages = s3.get_paginator("list_objects_v2").paginate(Bucket=BUCKET, Prefix="incoming/")
+        for page in pages:
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if key.endswith("/") or key == "incoming/AMAZON_SES_SETUP_NOTIFICATION":
+                    continue
+                raw = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read()
+                status, text = post(raw)
+                LOG.info("%s -> HTTP %s %s", key, status, text[:200])
+                if 200 <= status < 300:
+                    move(key, "processed/")
+                elif 400 <= status < 500 and status != 429:
+                    move(key, "failed/")
+                elif datetime.now(timezone.utc) - obj["LastModified"] > MAX_AGE:
+                    move(key, "failed/")
+
+
+    def main() -> None:
+        LOG.info("polling s3://%s/incoming/ every %ss -> %s", BUCKET, POLL_SECONDS, DISCOURSE_URL)
+        while True:
+            try:
+                poll_once()
+                with open(HEARTBEAT, "w") as fh:
+                    fh.write(str(time.time()))
+            except Exception:
+                LOG.exception("poll failed")
+            time.sleep(POLL_SECONDS)
+
+
+    if __name__ == "__main__":
+        main()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discourse-mail-bridge
+  namespace: discourse
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  labels:
+    app.kubernetes.io/name: discourse-mail-bridge
+    app.kubernetes.io/part-of: discourse
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: discourse-mail-bridge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: discourse-mail-bridge
+        app.kubernetes.io/part-of: discourse
+      annotations:
+        # Roll the pod when the script changes.
+        checksum/bridge: "v1"
+    spec:
+      serviceAccountName: discourse-mail-bridge
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bridge
+          image: public.ecr.aws/lambda/python:3.12
+          command: ["python3", "-u", "/app/bridge.py"]
+          env:
+            - name: AWS_REGION
+              value: eu-central-1
+            - name: INBOUND_BUCKET
+              value: mzla-discourse-inbound
+            - name: DISCOURSE_URL
+              value: http://discourse-web.discourse.svc.cluster.local
+            - name: DISCOURSE_HOST
+              value: discourse.thunderbird.net
+            - name: POLL_SECONDS
+              value: "30"
+          envFrom:
+            - secretRef:
+                name: discourse-mail-bridge-credentials
+          volumeMounts:
+            - name: script
+              mountPath: /app
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            exec:
+              command:
+                - python3
+                - -c
+                - "import os,sys,time; sys.exit(time.time() - os.path.getmtime('/tmp/heartbeat') > 300)"
+            initialDelaySeconds: 120
+            periodSeconds: 60
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: script
+          configMap:
+            name: discourse-mail-bridge
+        - name: tmp
+          emptyDir: {}
