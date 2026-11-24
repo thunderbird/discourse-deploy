@@ -18,8 +18,7 @@ Discourse is a Rails (Ruby 3.4) forum platform. Upstream officially supports Doc
 
 | Component | Image | Purpose |
 |-----------|-------|---------|
-| `discourse-web` | `668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:latest` | nginx → Puma + Rails on `:80`. 2 replicas. discourse-prometheus collector on `:9405` (pod-network only). |
-| `discourse-sidekiq` | same image, `bundle exec sidekiq` | Background jobs (mail, search index, digest). Reports metrics to web's collector via IPC. 1 replica. |
+| `discourse-web` | `668807881758.dkr.ecr.eu-central-1.amazonaws.com/discourse:latest` | nginx → Puma + Rails on `:80`. 2 replicas. Each pod also runs one Sidekiq (`UNICORN_SIDEKIQS`) for background jobs (mail, search index, digest). discourse-prometheus collector on `:9405` (pod-network only). |
 | `discourse-tunnel` | `cloudflare/cloudflared` (managed by `cloudflare-operator`) | Outbound tunnel. Zero inbound ports. |
 | `discourse-postgres` (RDS) | `postgres:16.6` (AWS RDS) | Application database. 7-day automated backup retention. |
 | `discourse-redis` (ElastiCache) | `redis:7.1` (AWS ElastiCache) | Cache + Sidekiq queue. AUTH-token enabled, transit encryption on. |
@@ -60,8 +59,8 @@ Cloned in by `container/containers/app.yml` (NOT bundled in the base):
   │  discourse-web (nginx + Puma) │──── :9405/metrics ──► VMAgent
   │  - HTTP API + UI              │      (only after PROMETHEUS_WEBSERVER_BIND=0.0.0.0)
   │  - discourse-prometheus       │
-  │  - aggregates sidekiq metrics │
-  │    via Unix socket IPC        │
+  │  - Sidekiq (background jobs)  │
+  │    metrics via localhost:9405 │
   └───────────────────────────────┘
             │            │
             │            └──► s3:mzla-discourse-uploads (IRSA: workloads-prod-discourse-default)
@@ -74,13 +73,9 @@ Cloned in by `container/containers/app.yml` (NOT bundled in the base):
 │ (AUTH+TLS)   │    │  postgres        │
 │ master.disc..│    │  16.6, db.t4g.   │
 └──────────────┘    │  medium, 30Gi    │
-        ▲           │  gp3, encrypted  │
-        │ jobs      │  7d backups      │
-        │           └──────────────────┘
-   ┌────┴────────────────┐    ▲
-   │ discourse-sidekiq   │────┘
-   │ (bundle exec sidekiq│   reports metrics → web's collector via Unix socket
-   └─────────────────────┘
+                    │  gp3, encrypted  │
+                    │  7d backups      │
+                    └──────────────────┘
 ```
 
 YACE runs in the same namespace, scrapes CloudWatch via IRSA, exposes Prometheus metrics on `:5000` for VMAgent.
@@ -116,7 +111,6 @@ discourse-deploy/
 │   │   ├── rds-bootstrap-job.yaml                  CREATE USER + GRANTs + hstore + pg_trgm + vector
 │   │   ├── discourse-config.yaml                   ConfigMap of DISCOURSE_* env
 │   │   ├── discourse-web.yaml                      Deployment + Service for nginx+Puma (image `:latest`)
-│   │   ├── discourse-sidekiq.yaml                  Deployment for Sidekiq workers (image `:latest`)
 │   │   ├── discourse-migrate-job.yaml              Sync-hook Job: bundle exec rake db:migrate
 │   │   └── cloudflare-tunnel.yaml                  Tunnel + TunnelBinding (discourse.thunderbird.net)
 │   └── observability/
@@ -157,7 +151,7 @@ Order matters because the ACK CRDs report endpoints in their `status` only **aft
    ```
    PR the resolved values into `discourse-config.yaml` (`DISCOURSE_DB_HOST`, `DISCOURSE_REDIS_HOST`) and `rds-bootstrap-job.yaml` (`PGHOST`).
 6. **Wave 4 hooks** (`rds-bootstrap-job` + `discourse-migrate-job`) run after the patch syncs. Bootstrap creates `discourse_app_user` + grants + extensions (`hstore`, `pg_trgm`, `vector`); migrate runs all Discourse Rails migrations against RDS.
-7. **Wave 5** brings up `discourse-web`, `discourse-sidekiq`, the Cloudflare tunnel, and the VMPodScrape. First Discourse boot takes ~3–5 min.
+7. **Wave 5** brings up `discourse-web`, the Cloudflare tunnel, and the VMPodScrape. First Discourse boot takes ~3–5 min.
 8. **Smoke**: `curl https://discourse.thunderbird.net/` (Cloudflare may challenge — open in browser); admin login uses creds from `mzla/discourse/app`.
 
    ```
@@ -173,13 +167,13 @@ Order matters because the ACK CRDs report endpoints in their `status` only **aft
 
 ### Image upgrades
 
-The `image:` field in `argocd/workloads/discourse-{web,sidekiq,migrate-job}.yaml` tracks `:latest` with `imagePullPolicy: Always`. Because the manifest doesn't change between builds, ArgoCD won't roll anything on its own, and any pod restart (node drain, eviction, crash) pulls whatever `:latest` currently points at. To roll a new image:
+The `image:` field in `argocd/workloads/discourse-{web,migrate-job}.yaml` tracks `:latest` with `imagePullPolicy: Always`. Because the manifest doesn't change between builds, ArgoCD won't roll anything on its own, and any pod restart (node drain, eviction, crash) pulls whatever `:latest` currently points at. To roll a new image:
 
 1. Tag this repo `v0.1.x` — GHA builds and pushes `:v0.1.x` and `:latest`
 2. Run migrations: trigger an ArgoCD sync of the discourse app (the `discourse-db-migrate` Sync hook re-runs on every sync)
-3. Restart the workloads: `kubectl rollout restart deploy/discourse-web deploy/discourse-sidekiq -n discourse`
+3. Restart the workloads: `kubectl rollout restart deploy/discourse-web -n discourse`
 
-To roll back, pin the three manifests to a known-good `v0.1.x` tag.
+To roll back, pin both manifests to a known-good `v0.1.x` tag.
 
 ### Adding admins
 
@@ -191,7 +185,7 @@ Two paths:
 
 ```
 kubectl --context arn:aws:eks:eu-central-1:668807881758:cluster/mzla-eks-workloads01 \
-  rollout restart deploy/discourse-web deploy/discourse-sidekiq -n discourse
+  rollout restart deploy/discourse-web -n discourse
 ```
 
 ### Backups

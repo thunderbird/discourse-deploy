@@ -24,7 +24,7 @@ data:
   # --- Postgres (RDS) ---
   # PG host is a <TBD> placeholder. ACK does not surface the RDS endpoint
   # until *after* the DBInstance reconciles, so wave 5 (this ConfigMap +
-  # the web/sidekiq Deployments) cannot resolve it on the first sync.
+  # the web Deployment) cannot resolve it on the first sync.
   # Bring-up procedure: after wave 3 lands, run
   #   kubectl get dbinstance discourse-postgres -n discourse \
   #     -o jsonpath='{.status.endpoint.address}'
@@ -62,6 +62,10 @@ data:
 
   # --- Sidekiq / web tuning ---
   UNICORN_WORKERS: "3"
+  # Background jobs run in the web pods: pitchfork supervises this many
+  # Sidekiq processes per pod. Keep it at 1 or more, there is no separate
+  # Sidekiq Deployment.
+  UNICORN_SIDEKIQS: "1"
   DISCOURSE_DB_POOL: "8"
 
   # --- Misc ---

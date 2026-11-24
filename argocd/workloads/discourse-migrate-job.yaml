@@ -1,8 +1,8 @@
 # Discourse db:migrate against RDS.
 #
 # Runs after rds-bootstrap-job (which creates discourse_app_user, grants,
-# and the hstore + pg_trgm extensions) and before discourse-web /
-# discourse-sidekiq pods start. Idempotent -- Rails migrations track
+# and the hstore + pg_trgm extensions) and before discourse-web
+# pods start. Idempotent -- Rails migrations track
 # what's been run in schema_migrations and skip ones already applied.
 #
 # Sync hook so re-runs trigger on every ArgoCD sync (covers image bumps
