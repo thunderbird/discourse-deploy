@@ -7,9 +7,10 @@
 # localhost-only).
 #
 # Only web pods are scraped: the prometheus collector runs as a child
-# of the unicorn master, so the HTTP server lives on the web pods.
-# Sidekiq processes report their metrics to the collector via IPC,
-# so discourse_sidekiq_* metrics surface on the web pods' :9405 too.
+# of the unicorn master. Sidekiq runs in the same pods and reports to the
+# collector on localhost:9405 (the plugin hardcodes localhost), so
+# discourse_sidekiq_* metrics come from here too. A Sidekiq in its own pod
+# has no collector to report to and logs "Connection refused" twice a second.
 apiVersion: operator.victoriametrics.com/v1beta1
 kind: VMPodScrape
 metadata:
