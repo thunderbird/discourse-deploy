@@ -8,10 +8,10 @@
 # so it skips the Cloudflare managed challenge in front of the public
 # hostname, and needs no inbound port. See docs/inbound-email.md.
 #
-# replicas: 0 on purpose. Do not scale up until (1) the platform-infrastructure
-# pieces exist (IRSA role, SM secret, SES receipt rule), (2) the Discourse
-# site settings are set, and (3) Matthew OKs enabling inbound mail -- the
-# Topicbox imports (PE-Routing #22/#23) must run first.
+# Enabled for pre-production testing of reply-by-email (PE-Routing #20).
+# Rollback: replicas: 0 here, plus discourse_inbound.active: false in
+# platform-infrastructure Pulumi (or remove the MX record). Messages that
+# arrive while the bridge is down wait in incoming/ (14-day lifecycle).
 #
 # Image: AWS's Lambda Python base image, used only because it ships boto3
 # (multi-arch, so it runs on the Graviton nodes). Its Lambda entrypoint is
@@ -140,7 +140,7 @@ metadata:
     app.kubernetes.io/name: discourse-mail-bridge
     app.kubernetes.io/part-of: discourse
 spec:
-  replicas: 0
+  replicas: 1
   strategy:
     type: Recreate
   selector:

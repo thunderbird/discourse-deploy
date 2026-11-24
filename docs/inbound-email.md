@@ -31,7 +31,7 @@ sender MTA --MX--> inbound-smtp.eu-central-1.amazonaws.com  (SES, receipt rule s
            s3://mzla-discourse-inbound/incoming/<messageId>          (ACK Bucket, this repo)
                       | poll every 30 s (IRSA: workloads-prod-discourse-mail-bridge)
                       v
-           discourse-mail-bridge pod (this repo, replicas: 0 until go-live)
+           discourse-mail-bridge pod (this repo)
                       | POST http://discourse-web/admin/email/handle_mail   email_encoded=<base64>
                       |   Host: discourse.thunderbird.net, Api-Key (scope email:receive_emails)
                       v
@@ -43,7 +43,7 @@ sender MTA --MX--> inbound-smtp.eu-central-1.amazonaws.com  (SES, receipt rule s
 
 - `argocd/aws-resources/s3-inbound-bucket.yaml`: ACK Bucket `mzla-discourse-inbound`. SSE-S3, public access blocked, lifecycle (incoming/processed 14 d, failed 60 d), and a bucket policy that only lets this account's `discourse-inbound` receipt rules `PutObject` into `incoming/`.
 - `argocd/secrets/discourse-mail-bridge-credentials.yaml`: ExternalSecret `mzla/discourse/inbound` -> `DISCOURSE_API_KEY`.
-- `argocd/workloads/discourse-mail-bridge.yaml`: ServiceAccount (IRSA), ConfigMap with the bridge script, and a Deployment at **`replicas: 0`**.
+- `argocd/workloads/discourse-mail-bridge.yaml`: ServiceAccount (IRSA), ConfigMap with the bridge script, and a Deployment (`replicas: 1`).
 
 ## What has to go elsewhere (not in this PR)
 
@@ -91,7 +91,7 @@ The receiving domain is `reply.discourse.thunderbird.net` rather than the forum 
 API key: Admin -> API -> New -> user `system`, **Granular** scope `email: receive_emails` only. Put it in `mzla/discourse/inbound` as `{"api_key": "..."}`.
 
 ### Go-live sequence (each step is a live change and needs Matthew's go)
-0. **Gate:** not while the Topicbox imports ([#22](https://github.com/thunderbird/PE-Routing/issues/22)/[#23](https://github.com/thunderbird/PE-Routing/issues/23)) are pending. Imports run with outbound email disabled, and inbound shouldn't be live either.
+0. **Imports:** go-live no longer waits for the Topicbox imports ([#22](https://github.com/thunderbird/PE-Routing/issues/22)/[#23](https://github.com/thunderbird/PE-Routing/issues/23)); reply-by-email gets tested first ([request](https://github.com/thunderbird/PE-Routing/issues/20#issuecomment-6839929958)). Imports run with outbound email disabled, so pause inbound for each import run: scale the bridge to 0 and mail waits in `incoming/`. That prefix expires after 14 days, so keep the pause shorter.
 1. Merge [platform-infrastructure#1510](https://github.com/thunderbird/platform-infrastructure/pull/1510) (role and secret shell; SES flags off).
 2. Create the API key (see below) and store it in `mzla/discourse/inbound`. An empty secret leaves the ExternalSecret Ready=False and the Argo app Degraded. Then merge this PR. Argo creates the bucket and the ExternalSecret; the bridge stays at 0 replicas. Then a small Pulumi PR sets `discourse_inbound.receipt_rule: true` (rule set and rule created, still inactive).
 3. Set the site settings above.
